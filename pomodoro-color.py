@@ -4,48 +4,59 @@ import re
 import datetime
 import sys
 
-C_STOP = "#666666"
-C_WORKING0 = C_STOP
-C_PAUSE = "#40e0d0"
-
+# czas poszczególnych trybów
 time_pomodoro = 25
 time_break = 5
 time_long_break = 15
 
+C_STOP = "#666666"
+C_WORKING0 = C_STOP
+C_PAUSE = "#40e0d0"
+COLOR_STOP = "#666666"
+
+# todo: Zmiana kolorów
+# todo: Zapis ustawień kolorów do pliku, oraz ich odczyt,
+# todo: Zapis czasów
+# todo: Proste GUI z wyborem kolorów i znaków
+# todo: Rezygnacja z i3-gnome-pomodoro
+# todo: Poprawnie działania long break pause itp
 long_break_colors = [[12, "#7FFF00"],
                      [9, "#7FFF00"],
                      [6, "#7FFF00"],
                      [3, "#7FFF00"],
                      [0, "#7FFF00"]]
+
 break_colors = [[4, "#7FFF00"],
                 [3, "#7FFF00"],
                 [2, "#7FFF00"],
                 [1, "#7FFF00"],
                 [0, "#7FFF00"]]
+
 working_colors = [[20, "#7FFF00"],
                   [15, "#CAFF70"],
                   [10, "#FFB90F"],
                   [5, "#FF7F50"],
                   [0, "#FF3030"]]
 
+# komendy sterujące pomodoro
 CMD_START = ["i3-gnome-pomodoro", "start"]
 CMD_STOP = ["i3-gnome-pomodoro", "stop"]
 CMD_TGL = ["i3-gnome-pomodoro", "toggle"]
 CMD_SKIP = ["i3-gnome-pomodoro", "skip"]
 CMD_STATUS = ["i3-gnome-pomodoro", "status"]
-COLOR_STOP = "#666666"
 
 # status
-STOPED = 0
-WORKING = 1
-PAUSE = 2
-BREAK = 3
-LONGBREAK = 4
+STATUS_STOP = 0
+STATUS_WORKING = 1
+STATUS_PAUSE = 2
+STATUS_BREAK = 3
+STATUS_LONG_BREAK = 4
 
-BTOFF = 0
-BTLEFT = 1
-BTRIGHT = 3
-BTMID = 2
+# stany przycisków myszy
+BUTTON_OFF = 0
+BUTTON_LEFT = 1
+BUTTON_MID = 2
+BUTTON_RIGHT = 3
 
 
 def get_object_color(color_obj, time):
@@ -60,23 +71,23 @@ def run_command(cmd):
     return subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
 
 
+# todo: kolejność wyłapywania
 def get_mode(cmd_str):
-    if cmd_str.find("PAUSED") != -1:
-        return PAUSE
-
-    if cmd_str.find("Break") != -1:
-        return BREAK
-
     if cmd_str.find("00:00") != -1:
-        return STOPED
+        return STATUS_STOP
 
     if cmd_str.find("Long") != -1:
-        return LONGBREAK
+        return STATUS_LONG_BREAK
 
-    return WORKING
+    if cmd_str.find("Break") != -1:
+        return STATUS_BREAK
+
+    if cmd_str.find("PAUSED") != -1:
+        return STATUS_PAUSE
+
+    return STATUS_WORKING
 
 
-# czas
 def get_time(string):
     string = string.strip()
 
@@ -84,7 +95,7 @@ def get_time(string):
 
     try:
         time = time.findall(string)[0]
-    except ValueError:
+    except IndexError:
         time = "00:00"
     if time[-2] == '6':
         time[-2] = 5
@@ -96,19 +107,19 @@ def get_time(string):
 
 
 def get_color(time, mode):
-    if mode == STOPED:
+    if mode == STATUS_STOP:
         return C_STOP
 
-    if mode == PAUSE:
+    if mode == STATUS_PAUSE:
         return C_PAUSE
 
-    if mode == BREAK:
+    if mode == STATUS_BREAK:
         return get_object_color(break_colors, time)
 
-    if mode == LONGBREAK:
+    if mode == STATUS_LONG_BREAK:
         return get_object_color(long_break_colors, time)
 
-    if mode == WORKING:
+    if mode == STATUS_WORKING:
         return get_object_color(working_colors, time)
 
     return C_WORKING0
@@ -121,18 +132,18 @@ def get_rec(time, mode):
     buf = ""
 
     div = 5
-    if mode == BREAK:
+    if mode == STATUS_BREAK:
         div = 1
-    if mode == LONGBREAK:
+    if mode == STATUS_LONG_BREAK:
         div = 3
 
-    con = int(time.minute / div)
-    coff = 4 - con
+    c_on = int(time.minute / div)
+    c_off = 4 - c_on
 
-    for i in range(coff):
+    for i in range(c_off):
         buf = buf + off
 
-    for i in range(con):
+    for i in range(c_on):
         buf = buf + on
 
     return buf
@@ -151,47 +162,48 @@ def get_bat(time):
     return ""
 
 
-def print_state(cmd_str, bt):
+def print_state(cmd_str):
     time = get_time(cmd_str)
     mode = get_mode(cmd_str)
     color = get_color(time, mode)
 
     print(get_rec(time, mode).strip() + " " + cmd_str.strip())
-    #print(get_bat(time).strip() + " " + cmd_str.strip())
+    # wersja z baterią
+    # print(get_bat(time).strip() + " " + cmd_str.strip())
     print("")
     print(color.strip())
 
 
-def onBT(button_state):
+def on_button(button_state):
     button_state = int(button_state)
     #
-    if button_state == BTOFF:
+    if button_state == BUTTON_OFF:
         return ""
-    if button_state == BTLEFT:
+    if button_state == BUTTON_LEFT:
         run_command(CMD_TGL)
 
-    if button_state == BTRIGHT:
+    if button_state == BUTTON_RIGHT:
         pass
         run_command(CMD_STOP)
         run_command(CMD_START)
 
-    if button_state == BTMID:
+    if button_state == BUTTON_MID:
         run_command(CMD_SKIP)
     pass
 
 
 def update_status():
-    CMDSTATUSOUTPUT = run_command(CMD_STATUS)
-    # os.wait(1);
-    print_state(CMDSTATUSOUTPUT, 0)
+    cmd_status_output = run_command(CMD_STATUS)
+    print_state(cmd_status_output)
 
 
-try:
-    BUTTONSTATE = sys.argv[1]
-except:
-    BUTTONSTATE = 0
+if __name__ == "__main__":
+    try:
+        BUTTON_STATE = sys.argv[1]
+    except IndexError:
+        BUTTON_STATE = 0
 
-onBT(BUTTONSTATE)
+    on_button(BUTTON_STATE)
 
-update_status()
-sys.exit(0)
+    update_status()
+    sys.exit(0)
