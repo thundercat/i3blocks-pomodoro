@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec /home/krzysiek/PycharmProjects/i3-pomodoro-color/pomodoro-color.py ${BLOCK_BUTTON}
+exec /home/${USER}/PycharmProjects/i3-pomodoro-color/pomodoro-color.py ${BLOCK_BUTTON}

@@ -3,47 +3,71 @@ import subprocess
 import re
 import datetime
 import sys
+import yaml
+import os
+import pomodorocolorchooser
+import logging
 
-# czas poszczególnych trybów
-time_pomodoro = 25
-time_break = 5
-time_long_break = 15
+file_log = False
+if file_log:
+    handlers = [logging.FileHandler("{0}/{1}.log".format('./', 'pomodoro.log')), logging.StreamHandler()]
+else:
+    handlers = [logging.StreamHandler()]
+logging.basicConfig(level=logging.INFO, handlers=handlers)
+logger = logging.getLogger(__name__)
+logger.info('Start aplikacji.')
 
-C_STOP = "#666666"
-C_WORKING0 = C_STOP
-C_PAUSE = "#40e0d0"
+
+class ConfigurationBase(dict):
+    def __init__(self):
+        super(ConfigurationBase, self).__init__()
+        self.cfg_file = os.path.dirname(os.path.realpath(__file__)) + "/" + os.getenv('INIFILE', "config" + '.yaml')
+        self.yaml_data = self.load(self.cfg_file)
+        try:
+            self.update(self.yaml_data)
+        except TypeError:
+            self.update(dict())
+            raise TypeError
+
+    def load(self, config_filename):
+        """
+        Metoda wczytuje dane yaml z pliku
+        :param config_filename: pełna ścieżka pliku z ustawieniami
+        :return:
+        """
+        try:
+            with open(config_filename, 'r') as stream:
+                try:
+                    return yaml.load(stream)
+                except yaml.YAMLError as exc:
+                    print(exc)
+        except FileNotFoundError:
+            self.save_data(self)
+
+    def save_data(self, data):
+        self.save(self.cfg_file, data)
+
+    def save(self, config_filename, data):
+        """
+        Metoda zapisuje dane yaml do pliku
+        :param config_filename: pełna ścieżka do pliku z ustawieniami
+        :param data: dane yaml do zapisu
+        :return:
+        """
+        with open(config_filename, 'w') as outfile:
+            yaml.dump(dict(data), outfile)
+            self.yaml_data = self.load(config_filename)
+
+
+DEFAULT_C_STOP = "#666666"
+C_WORKING0 = DEFAULT_C_STOP
+DEFAULT_C_PAUSE = "#40e0d0"
 COLOR_STOP = "#666666"
 
-# todo: Zmiana kolorów
-# todo: Zapis ustawień kolorów do pliku, oraz ich odczyt,
-# todo: Zapis czasów
-# todo: Proste GUI z wyborem kolorów i znaków
+# todo: Gui labele z zakresami
 # todo: Rezygnacja z i3-gnome-pomodoro
-# todo: Poprawnie działania long break pause itp
-long_break_colors = [[12, "#7FFF00"],
-                     [9, "#7FFF00"],
-                     [6, "#7FFF00"],
-                     [3, "#7FFF00"],
-                     [0, "#7FFF00"]]
-
-break_colors = [[4, "#7FFF00"],
-                [3, "#7FFF00"],
-                [2, "#7FFF00"],
-                [1, "#7FFF00"],
-                [0, "#7FFF00"]]
-
-working_colors = [[20, "#7FFF00"],
-                  [15, "#CAFF70"],
-                  [10, "#FFB90F"],
-                  [5, "#FF7F50"],
-                  [0, "#FF3030"]]
-
-# komendy sterujące pomodoro
-CMD_START = ["i3-gnome-pomodoro", "start"]
-CMD_STOP = ["i3-gnome-pomodoro", "stop"]
-CMD_TGL = ["i3-gnome-pomodoro", "toggle"]
-CMD_SKIP = ["i3-gnome-pomodoro", "skip"]
-CMD_STATUS = ["i3-gnome-pomodoro", "status"]
+# todo: Gui/CLi zakresy czasu wyliczanie vs edycja w GUI
+# todo: Output klasa
 
 # status
 STATUS_STOP = 0
@@ -58,6 +82,48 @@ BUTTON_LEFT = 1
 BUTTON_MID = 2
 BUTTON_RIGHT = 3
 
+default_cfg = {'CMD_SKIP': ['i3-gnome-pomodoro', 'skip'],
+               'CMD_START': ['i3-gnome-pomodoro', 'start'],
+               'CMD_STATUS': ['i3-gnome-pomodoro', 'status'],
+               'CMD_STOP': ['i3-gnome-pomodoro', 'stop'],
+               'CMD_TGL': ['i3-gnome-pomodoro', 'toggle'],
+               'LONG_BREAK': [[12, '#ff0004'], [9, '#ff007f'], [6, '#ff00ff'], [3, '#ff55ff'], [0, '#ffaaff']],
+               'NORMAL_BREAK': [[4, '#00aa00'], [3, '#aaff7f'], [2, '#aaffff'], [1, '#ffff7f'], [0, '#ff0000']],
+               'WORKING_COLOR': [[20, '#00ff00'], [15, '#CAFF70'], [10, '#FFB90F'], [5, '#FF7F50'], [0, '#ff0000']],
+               'PAUSE_COLOR': '#40e0d0',
+               'STOP_COLOR': '#666666',
+               'TIMEBREAK': 5,
+               'TIMELONGBREAK': 15,
+               'TIMEPOMODORO': 25,
+               }
+
+
+def load_default_config(config):
+       config = default_cfg
+
+
+try:
+    cfg = ConfigurationBase()
+    save_flag = False
+    for item in default_cfg:
+        logger.info("klucz %s", item)
+        try:
+            a = cfg[item]
+        except KeyError:
+            logger.info("brak klucza: %s", item)
+            cfg[item] = default_cfg[item]
+            save_flag = True
+
+except TypeError:
+    logger.info("Brak pliku konfiguracyjnego. Utworzenie ")
+    cfg = ConfigurationBase()
+    load_default_config(cfg)
+    save_flag = True
+
+if save_flag:
+    logger.info("Zapisanie ustawień")
+    cfg.save_data(cfg)
+
 
 def get_object_color(color_obj, time):
     for item in color_obj:
@@ -67,67 +133,134 @@ def get_object_color(color_obj, time):
     return color_obj[-1][1]
 
 
-def run_command(cmd):
-    return subprocess.run(cmd, stdout=subprocess.PIPE).stdout.decode('utf-8')
+class Command:
+    def __init__(self, cmd_str):
+        self.cmd_output = subprocess.run(cmd_str, stdout=subprocess.PIPE).stdout.decode('utf-8')
+
+    def __str__(self):
+        return self.cmd_output
 
 
-# todo: kolejność wyłapywania
-def get_mode(cmd_str):
-    if cmd_str.find("00:00") != -1:
-        return STATUS_STOP
-
-    if cmd_str.find("Long") != -1:
-        return STATUS_LONG_BREAK
-
-    if cmd_str.find("Break") != -1:
-        return STATUS_BREAK
-
-    if cmd_str.find("PAUSED") != -1:
-        return STATUS_PAUSE
-
-    return STATUS_WORKING
+def gui(cfg):
+    pomodorocolorchooser.make_gui(cfg)
 
 
-def get_time(string):
-    string = string.strip()
+class OutputBase:
+    def __init__(self, mode, time):
+        self.mode = mode
+        self.time = time
+        self.output_cfg = dict()
 
-    time = re.compile(r"\d\d:\d\d")
+    def __str__(self):
+        raise NotImplementedError()
 
-    try:
-        time = time.findall(string)[0]
-    except IndexError:
-        time = "00:00"
-    if time[-2] == '6':
-        time[-2] = 5
-        time[-1] = 9
 
-    time = datetime.datetime.strptime(time, "%M:%S")
+class RecOutput(OutputBase):
+    def __init__(self, mode, time):
+        super(RecOutput, self).__init__(mode, time)
+        self.cli_str = ""
 
-    return time
+    def __str__(self):
+        return
+
+
+class Apl:
+    def __init__(self):
+        self.cfg = None
+        self.output = None
+        self.button_state = None
+
+    def set_button_state(self, button_state):
+        self.button_state = button_state
+
+    def on_button(self, button_state):
+        try:
+            button_state = int(button_state)
+        except ValueError:
+            return
+
+        if button_state == BUTTON_OFF:
+            return
+
+        if button_state == BUTTON_LEFT:
+            Command(cfg['CMD_TGL'])
+            return
+
+        if button_state == BUTTON_RIGHT:
+            Command(cfg['CMD_STOP'])
+            Command(cfg['CMD_START'])
+            return
+
+        if button_state == BUTTON_MID:
+            Command(cfg['CMD_SKIP'])
+            return
+
+    def run(self):
+        self.on_button(self.button_state)
+
+
+class Mode:
+    def __init__(self, cmd_str):
+
+        self.mode = STATUS_WORKING
+
+        if cmd_str.find("00:00") != -1:
+            self.mode = STATUS_STOP
+
+        if cmd_str.find("Long") != -1:
+            self.mode = STATUS_LONG_BREAK
+
+        if cmd_str.find("Break") != -1:
+            self.mode = STATUS_BREAK
+
+        if cmd_str.find("PAUSED") != -1:
+            self.mode = STATUS_PAUSE
+
+    def __int__(self):
+        return self.mode
+
+
+class PomodoroTime:
+    def __init__(self, string):
+        time = re.compile(r"\d\d:\d\d")
+
+        try:
+            time = time.findall(string.strip())[0]
+        except IndexError:
+            time = "00:00"
+
+        if time[-2] == '6':
+            time = time.replace("60", "59")
+
+        self.time = datetime.datetime.strptime(time, "%M:%S")
+
+        self.minute = self.time.minute
+        self.second = self.time.second
 
 
 def get_color(time, mode):
+    mode = int(mode)
     if mode == STATUS_STOP:
-        return C_STOP
+        return cfg["STOP_COLOR"]
 
     if mode == STATUS_PAUSE:
-        return C_PAUSE
+        return cfg["PAUSE_COLOR"]
 
     if mode == STATUS_BREAK:
-        return get_object_color(break_colors, time)
+        return get_object_color(cfg["NORMAL_BREAK"], time)
 
     if mode == STATUS_LONG_BREAK:
-        return get_object_color(long_break_colors, time)
+        return get_object_color(cfg["LONG_BREAK"], time)
 
     if mode == STATUS_WORKING:
-        return get_object_color(working_colors, time)
+        return get_object_color(cfg["WORKING_COLOR"], time)
 
     return C_WORKING0
 
 
 def get_rec(time, mode):
-    on = "□"
-    off = "■"
+    off = "□"
+    on = "■"
 
     buf = ""
 
@@ -163,47 +296,48 @@ def get_bat(time):
 
 
 def print_state(cmd_str):
-    time = get_time(cmd_str)
-    mode = get_mode(cmd_str)
+
+    time = PomodoroTime(str(cmd_str))
+    logger.info("time: %s", time.minute)
+
+    mode = Mode(str(cmd_str))
+    logger.info("mode: %" + str(int(mode)))
+
     color = get_color(time, mode)
 
-    print(get_rec(time, mode).strip() + " " + cmd_str.strip())
+    print(get_rec(time, mode).strip() + " " + str(cmd_str).strip())
+
     # wersja z baterią
     # print(get_bat(time).strip() + " " + cmd_str.strip())
     print("")
     print(color.strip())
 
 
-def on_button(button_state):
-    button_state = int(button_state)
-    #
-    if button_state == BUTTON_OFF:
-        return ""
-    if button_state == BUTTON_LEFT:
-        run_command(CMD_TGL)
-
-    if button_state == BUTTON_RIGHT:
-        pass
-        run_command(CMD_STOP)
-        run_command(CMD_START)
-
-    if button_state == BUTTON_MID:
-        run_command(CMD_SKIP)
-    pass
-
 
 def update_status():
-    cmd_status_output = run_command(CMD_STATUS)
+    cmd_status_output = Command(cfg['CMD_STATUS'])
     print_state(cmd_status_output)
 
 
 if __name__ == "__main__":
+    logger.info("Sys argv: %s", sys.argv)
     try:
         BUTTON_STATE = sys.argv[1]
     except IndexError:
         BUTTON_STATE = 0
 
-    on_button(BUTTON_STATE)
+    logger.info("Stan przycisku: %s", BUTTON_STATE)
+    apl = Apl()
+    apl.set_button_state(BUTTON_STATE)
+    apl.run()
 
     update_status()
+
+    try:
+        if sys.argv[1] == "gui":
+            logger.info("Uruchomienie GUI")
+            gui(cfg)
+    except IndexError:
+        pass
+
     sys.exit(0)
