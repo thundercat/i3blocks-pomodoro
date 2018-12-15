@@ -1,0 +1,28 @@
+CMD_SKIP: [i3-gnome-pomodoro, skip]
+CMD_START: [i3-gnome-pomodoro, start]
+CMD_STATUS: [i3-gnome-pomodoro, status]
+CMD_STOP: [i3-gnome-pomodoro, stop]
+CMD_TGL: [i3-gnome-pomodoro, toggle]
+LONG_BREAK:
+- [12, '#ff0004']
+- [9, '#ff007f']
+- [6, '#ff00ff']
+- [3, '#ff55ff']
+- [0, '#ffaaff']
+NORMAL_BREAK:
+- [4, '#00aa00']
+- [3, '#aaff7f']
+- [2, '#aaffff']
+- [1, '#ffff7f']
+- [0, '#ff0000']
+PAUSE_COLOR: '#40e0d0'
+STOP_COLOR: '#666666'
+TIMEBREAK: 5
+TIMELONGBREAK: 15
+TIMEPOMODORO: 25
+WORKING_COLOR:
+- [20, '#00ff00']
+- [15, '#aaff00']
+- [10, '#00ffff']
+- [5, '#FF7F50']
+- [0, '#ff0000']
