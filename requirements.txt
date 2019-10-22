@@ -1,2 +1,2 @@
 PyQt5==5.11.3
-PyYAML==3.13
+PyYAML==5.1
